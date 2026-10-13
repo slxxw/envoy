@@ -152,6 +152,23 @@ createRetryPolicy(const envoy::config::core::v3::RetryPolicy& core_retry_policy,
                                          context);
 }
 
+// Convert the configured method_override enum to literal HTTP method used
+// for the authorization request. An unset value means the original method is kept
+// and mappeed to the empty string. Only GET and POST are permitted overrides.
+std::string methodOverrideName(envoy::config::core::v3::RequestMethod method) {
+  switch (method) {
+    case envoy::config::core::v3::RequestMethod::METHOD_UNSPECIFIED:
+      return {};
+    case envoy::config::core::v3::RequestMethod::GET:
+      return "GET";
+    case envoy::config::core::v3::RequestMethod::POST:
+      return "POST";
+    default:
+      // fallback to the original request method
+      return {};
+  }
+}
+
 } // namespace
 
 // Config
@@ -174,6 +191,7 @@ ClientConfig::ClientConfig(const envoy::extensions::filters::http::ext_authz::v3
       path_prefix_(THROW_OR_RETURN_VALUE(validatePathPrefix(path_prefix), std::string)),
       path_override_(THROW_OR_RETURN_VALUE(
           validatePathOverride(config.http_service().path_override()), std::string)),
+      method_override_(methodOverrideName(config.http_service().method_override())),
       tracing_name_(fmt::format("async {} egress", config.http_service().server_uri().cluster())),
       request_headers_parser_(THROW_OR_RETURN_VALUE(
           Router::HeaderParser::configure(
@@ -208,6 +226,7 @@ ClientConfig::ClientConfig(
           THROW_OR_RETURN_VALUE(validatePathPrefix(http_service.path_prefix()), std::string)),
       path_override_(
           THROW_OR_RETURN_VALUE(validatePathOverride(http_service.path_override()), std::string)),
+      method_override_(methodOverrideName(http_service.method_override())),
       tracing_name_(fmt::format("async {} egress", http_service.server_uri().cluster())),
       request_headers_parser_(THROW_OR_RETURN_VALUE(
           Router::HeaderParser::configure(
@@ -320,6 +339,11 @@ void RawHttpClientImpl::check(RequestCallbacks& callbacks,
         continue;
       }
 
+      if (key == Http::Headers::get().Method && !config_->methodOverride().empty()) {
+        headers->addCopy(key, config_->methodOverride());
+        continue;
+      }
+
       if (key == Http::Headers::get().Path) {
         if (!config_->pathOverride().empty()) {
           headers->addCopy(key, config_->pathOverride());
@@ -341,6 +365,11 @@ void RawHttpClientImpl::check(RequestCallbacks& callbacks,
         continue;
       }
 
+      if (key == Http::Headers::get().Method && !config_->methodOverride().empty()) {
+        headers->addCopy(key, config_->methodOverride());
+        continue;
+      }
+      
       if (key == Http::Headers::get().Path) {
         if (!config_->pathOverride().empty()) {
           headers->addCopy(key, config_->pathOverride());
